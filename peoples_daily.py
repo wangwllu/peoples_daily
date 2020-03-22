@@ -29,15 +29,15 @@ class Paper:
         self._clean_pages()
 
     def _save_pages(self) -> None:
-        if not os.path.exists(self.page_dir):
-            os.mkdir(self.page_dir)
+        if not os.path.exists(self._page_dir):
+            os.mkdir(self._page_dir)
 
         serial_nb = 1
         while True:
-            # it is assumed that the page number is less than 100
+            # it is assumed that the page number is less than 1000
             page_path = os.path.join(
-                self.page_dir,
-                '{:02d}.pdf'.format(serial_nb)
+                self._page_dir,
+                '{:03d}.pdf'.format(serial_nb)
             )
             page_url = self._generate_url(serial_nb)
 
@@ -61,7 +61,7 @@ class Paper:
         )
 
     def _merge_pages(self) -> None:
-        pages = sorted(glob.glob(os.path.join(self.page_dir, '*.pdf')))
+        pages = sorted(glob.glob(os.path.join(self._page_dir, '*.pdf')))
         if len(pages) == 0:
             warnings.warn(
                 'Failed! Check if the date is legitimate'
@@ -79,8 +79,8 @@ class Paper:
                     merger.write(file)
 
     def _clean_pages(self) -> None:
-        if os.path.exists(self.page_dir):
-            rmtree(self.page_dir)
+        if os.path.exists(self._page_dir):
+            rmtree(self._page_dir)
 
     @property
     def _f_year(self) -> str:
@@ -95,7 +95,7 @@ class Paper:
         return '{:02d}'.format(self.date)
 
     @property
-    def page_dir(self) -> str:
+    def _page_dir(self) -> str:
         return '人民日报-{}{}{}'.format(self._f_year, self._f_month, self._f_date)
 
     @property
