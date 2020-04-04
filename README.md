@@ -1,11 +1,6 @@
 # People's Daily PDF
 
-Generate a PDF file for People's Daily.
-
-## Dependence
-
-- `requests`
-- `PyPDF2`
+A Python script for generating a PDF file for People's Daily.
 
 ## Usage
 
