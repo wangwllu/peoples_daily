@@ -12,8 +12,6 @@ from typing import List
 
 class Paper:
 
-    _base_url = 'http://paper.people.com.cn/rmrb/page/'
-
     def __init__(self, date: datetime.date):
         self.date = date
 
@@ -52,6 +50,14 @@ class Paper:
                 s=serial_nb
             )
         )
+
+    @property
+    def _base_url(self):
+        threshold = datetime.date(2020, 7, 1)
+        if self.date < threshold:
+            return 'http://paper.people.com.cn/rmrb/page/'
+        else:
+            return 'http://paper.people.com.cn/rmrb/images/'
 
     def _check_integrity(self, pages: List[bytes]) -> None:
         if len(pages) == 0:
