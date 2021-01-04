@@ -12,8 +12,9 @@ from typing import List
 
 class Paper:
 
-    def __init__(self, date: datetime.date):
+    def __init__(self, date: datetime.date, verbose: bool = False):
         self.date = date
+        self.verbose = verbose
 
     def __call__(self, file_path):
         pages = self._load_pages()
@@ -27,6 +28,9 @@ class Paper:
         pages = []
         while True:
             page_url = self._generate_url(serial_nb)
+
+            if self.verbose:
+                print('Querying {}'.format(page_url))
 
             response = requests.get(page_url)
             if response.ok:
@@ -92,13 +96,18 @@ def main():
         default='',
         help='the path to output the paper file, e.g., ./paper.pdf'
     )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='whether print intermediate info'
+    )
     args = parser.parse_args()
 
     date = datetime.date.fromisoformat(args.date)
 
     if args.output == '':
         file_path = default_file_path(date)
-    paper = Paper(date)
+    paper = Paper(date, args.verbose)
     paper(file_path)
 
 
