@@ -22,10 +22,10 @@ Generate today's People's Daily:
 python peoples_daily.py
 ```
 
-Generate People's Daily for a particular date (2020-03-07) and save it to `paper.pdf`:
+Generate People's Daily for a particular date (2025-10-22) and save it to `paper.pdf`:
 
 ```bash
-python peoples_daily.py -d 2020-03-07 -o paper.pdf -v
+python peoples_daily.py -d 2025-10-22 -o paper.pdf -v
 ```
 
 ## TODO
