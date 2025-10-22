@@ -11,7 +11,7 @@ import re
 import requests
 from urllib.parse import urljoin
 
-from PyPDF2 import PdfFileMerger
+from PyPDF2 import PdfMerger
 from typing import Iterator, List, Optional
 
 
@@ -149,14 +149,14 @@ class Paper:
                 + ' and the network are available!'
             )
 
-    def _merge(self, pages: List[bytes]) -> PdfFileMerger:
+    def _merge(self, pages: List[bytes]) -> PdfMerger:
 
-        merger = PdfFileMerger(strict=False)
+        merger = PdfMerger(strict=False)
         for page in pages:
             merger.append(io.BytesIO(page))
         return merger
 
-    def _save(self, merger: PdfFileMerger, file_path: str):
+    def _save(self, merger: PdfMerger, file_path: str):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             with open(file_path, 'wb') as file:
