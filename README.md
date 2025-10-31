@@ -6,14 +6,16 @@ Generate a single PDF of People's Daily by fetching and stitching the official p
 
 - Python 3.12 or newer
 - `requests`, `pypdf`, `pytest` (development) — install with:
+
   ```bash
   pip install -r requirements.txt
   ```
+
 - Optional: [Ghostscript](https://ghostscript.com/) if you plan to use `--compress` for file-size reduction.
 
 ## Usage
 
-```
+```bash
 python peoples_daily.py [-h] [-d DATE] [-o OUTPUT] [-v] [--compress]
 ```
 
