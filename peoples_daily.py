@@ -1,25 +1,34 @@
 # -*- coding:utf-8 -*-
 
 import os
-import io
 import argparse
+import io
+import re
 import warnings
 import datetime
-
-import re
+import subprocess
+import tempfile
+import shutil
+import contextlib
 
 import requests
 from urllib.parse import urljoin
 
-from PyPDF2 import PdfMerger
+import logging
+
+from pypdf import PdfReader, PdfWriter
+from pypdf import _utils as pypdf_utils
+from pypdf.generic import _data_structures as pypdf_data_structures
+from pypdf.errors import PdfReadWarning
 from typing import Iterator, List, Optional
 
 
 class Paper:
 
-    def __init__(self, date: datetime.date, verbose: bool = False):
+    def __init__(self, date: datetime.date, verbose: bool = False, compress: bool = False):
         self.date = date
         self.verbose = verbose
+        self.compress = compress
         self._session = self._build_session(trust_env=True)
         self._fallback_session = (
             self._build_session(trust_env=False)
@@ -30,8 +39,8 @@ class Paper:
     def __call__(self, file_path):
         pages = self._load_pages()
         self._check_integrity(pages)
-        merger = self._merge(pages)
-        self._save(merger, file_path)
+        writer = self._merge(pages)
+        self._save(writer, file_path)
 
     def _load_pages(self) -> List[bytes]:
 
@@ -149,18 +158,156 @@ class Paper:
                 + ' and the network are available!'
             )
 
-    def _merge(self, pages: List[bytes]) -> PdfMerger:
+    def _merge(self, pages: List[bytes]) -> PdfWriter:
 
-        merger = PdfMerger(strict=False)
-        for page in pages:
-            merger.append(io.BytesIO(page))
-        return merger
+        writer = PdfWriter()
+        loggers = [
+            logging.getLogger('pypdf'),
+            logging.getLogger('pypdf.generic'),
+            logging.getLogger('pypdf.generic._data_structures'),
+        ]
+        original_levels = [logger.level for logger in loggers]
 
-    def _save(self, merger: PdfMerger, file_path: str):
+        if self.verbose:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", category=PdfReadWarning)
+                for page_bytes in pages:
+                    reader = PdfReader(io.BytesIO(page_bytes), strict=False)
+                    for page in reader.pages:
+                        writer.add_page(page)
+
+            for warning in caught or []:
+                if isinstance(warning.message, PdfReadWarning):
+                    print(f'Warning merging PDF page: {warning.message}')
+        else:
+            with self._suppress_pypdf_noise(loggers, original_levels):
+                for page_bytes in pages:
+                    reader = PdfReader(io.BytesIO(page_bytes), strict=False)
+                    for page in reader.pages:
+                        writer.add_page(page)
+        return writer
+
+    def _save(self, writer: PdfWriter, file_path: str):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            with open(file_path, 'wb') as file:
-                merger.write(file)
+            buffer = io.BytesIO()
+            if self.verbose:
+                writer.write(buffer)
+            else:
+                with self._suppress_pypdf_noise():
+                    writer.write(buffer)
+
+        writer.close()
+        pdf_bytes = buffer.getvalue()
+
+        if self.compress:
+            pdf_bytes = self._compress(pdf_bytes)
+
+        with open(file_path, 'wb') as file:
+            file.write(pdf_bytes)
+
+    def _compress(self, pdf_bytes: bytes) -> bytes:
+        compressed = self._compress_with_ghostscript(pdf_bytes)
+        if compressed is not None:
+            return compressed
+        return pdf_bytes
+
+    @contextlib.contextmanager
+    def _suppress_pypdf_noise(
+        self,
+        loggers: Optional[List[logging.Logger]] = None,
+        original_levels: Optional[List[int]] = None,
+    ):
+        if loggers is None:
+            loggers = [
+                logging.getLogger('pypdf'),
+                logging.getLogger('pypdf.generic'),
+                logging.getLogger('pypdf.generic._data_structures'),
+            ]
+        if original_levels is None:
+            original_levels = [logger.level for logger in loggers]
+
+        original_logger_warning_utils = pypdf_utils.logger_warning
+        original_logger_warning_structures = pypdf_data_structures.logger_warning
+        previous_disable_level = logging.root.manager.disable
+
+        try:
+            pypdf_utils.logger_warning = lambda msg, src: None  # type: ignore[assignment]
+            pypdf_data_structures.logger_warning = lambda msg, src: None  # type: ignore[assignment]
+            for logger in loggers:
+                logger.setLevel(logging.ERROR)
+            logging.disable(logging.CRITICAL)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=PdfReadWarning)
+                    yield
+        finally:
+            logging.disable(previous_disable_level)
+            pypdf_utils.logger_warning = original_logger_warning_utils
+            pypdf_data_structures.logger_warning = original_logger_warning_structures
+            for logger, level in zip(loggers, original_levels):
+                logger.setLevel(level)
+
+    def _compress_with_ghostscript(self, pdf_bytes: bytes) -> Optional[bytes]:
+        executable = (
+            shutil.which('gs')
+            or shutil.which('gswin64c')
+            or shutil.which('gswin32c')
+        )
+        if executable is None:
+            return None
+
+        input_fd, input_path = tempfile.mkstemp(suffix='.pdf')
+        output_fd, output_path = tempfile.mkstemp(suffix='.pdf')
+        os.close(input_fd)
+        os.close(output_fd)
+
+        try:
+            with open(input_path, 'wb') as input_file:
+                input_file.write(pdf_bytes)
+
+            command = [
+                executable,
+                '-sDEVICE=pdfwrite',
+                '-dCompatibilityLevel=1.4',
+                '-dPDFSETTINGS=/ebook',
+                '-dDetectDuplicateImages=true',
+                '-dDownsampleColorImages=true',
+                '-dColorImageResolution=120',
+                '-dReduceImageResolution=true',
+                '-dCompressFonts=true',
+                '-dSubsetFonts=true',
+                '-dAutoRotatePages=/None',
+                '-dNOPAUSE',
+                '-dQUIET',
+                '-dBATCH',
+                f'-sOutputFile={output_path}',
+                input_path,
+            ]
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if result.returncode != 0:
+                return None
+
+            if not os.path.exists(output_path):
+                return None
+
+            with open(output_path, 'rb') as output_file:
+                optimized = output_file.read()
+        finally:
+            for path in (input_path, output_path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+        if optimized and len(optimized) < len(pdf_bytes):
+            return optimized
+        return None
 
 
 def main():
@@ -168,7 +315,7 @@ def main():
     parser.add_argument(
         '-d', '--date',
         default=datetime.date.today().strftime('%Y-%m-%d'),
-        help='the date, e.g., 2020-03-07'
+        help='the date, e.g., 2025-10-15'
     )
     parser.add_argument(
         '-o', '--output',
@@ -180,6 +327,11 @@ def main():
         action='store_true',
         help='whether print intermediate info'
     )
+    parser.add_argument(
+        '--compress',
+        action='store_true',
+        help='enable Ghostscript compression (disabled by default)'
+    )
     args = parser.parse_args()
 
     date = datetime.date.fromisoformat(args.date)
@@ -188,7 +340,7 @@ def main():
         file_path = default_file_path(date)
     else:
         file_path = args.output
-    paper = Paper(date, args.verbose)
+    paper = Paper(date, args.verbose, args.compress)
     paper(file_path)
 
 

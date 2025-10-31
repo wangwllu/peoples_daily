@@ -1,34 +1,56 @@
 # People's Daily PDF
 
-A Python script for generating a PDF file for People's Daily.
+Generate a single PDF of People's Daily by fetching and stitching the official page PDFs.
+
+## Requirements
+
+- Python 3.12 or newer
+- `requests`, `pypdf`, `pytest` (development) — install with:
+  ```bash
+  pip install -r requirements.txt
+  ```
+- Optional: [Ghostscript](https://ghostscript.com/) if you plan to use `--compress` for file-size reduction.
 
 ## Usage
 
 ```
-usage: python peoples_daily.py [-h] [-d DATE] [-o OUTPUT] [-v]
-
-optional arguments:
-  -h, --help                    show this help message and exit
-  -d DATE, --date DATE          the date, e.g., 2020-03-07
-  -o OUTPUT, --output OUTPUT    the path to output the paper file, e.g., ./paper.pdf
-  -v, --verbose                 whether print intermediate info
+python peoples_daily.py [-h] [-d DATE] [-o OUTPUT] [-v] [--compress]
 ```
+
+| Flag | Description | Default |
+| ---- | ----------- | ------- |
+| `-d`, `--date` | Issue date (YYYY-MM-DD). | today |
+| `-o`, `--output` | Output filename. | `人民日报_<date>.pdf` |
+| `-v`, `--verbose` | Print progress + warning details. | off |
+| `--compress` | Run Ghostscript to shrink the merged PDF. | off |
 
 ## Examples
 
-Generate today's People's Daily:
+Fetch today's paper:
 
 ```bash
 python peoples_daily.py
 ```
 
-Generate People's Daily for a particular date (2025-10-22) and save it to `paper.pdf`:
+Show CLI help and available options:
 
 ```bash
-python peoples_daily.py -d 2025-10-22 -o paper.pdf -v
+python peoples_daily.py -h
 ```
 
-## TODO
+Save the 2025-10-15 issue to a custom file with verbose logging:
 
-* [ ] progress bar
-* [ ] compress the resulting PDF
+```bash
+python peoples_daily.py -d 2025-10-15 -o paper.pdf -v
+```
+
+Produce a compressed version (requires Ghostscript on PATH):
+
+```bash
+python peoples_daily.py -d 2025-10-15 --compress
+```
+
+## Notes
+
+- Compression uses Ghostscript with the `/ebook` profile. The script skips compression automatically if Ghostscript is not available.
+- Verbose mode surfaces upstream PDF parsing warnings that are hidden by default.
