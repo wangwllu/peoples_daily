@@ -1,10 +1,12 @@
 import os
+import argparse
 import base64
 import datetime
 import tempfile
 from unittest.mock import patch
 from urllib.parse import urljoin
-from peoples_daily import Paper
+import pytest
+from peoples_daily import Paper, PaperDownloadError, main, parse_date
 
 
 def test_generate_today_pdf():
@@ -33,6 +35,7 @@ def test_generate_today_pdf():
                 def __init__(self, ok, content=b''):
                     self.ok = ok
                     self.content = content
+                    self.headers = {}
 
             if url == expected_first_url:
                 return DummyResponse(True, minimal_pdf)
@@ -81,6 +84,7 @@ def test_generate_today_pdf_with_compression():
                 def __init__(self, ok, content=b''):
                     self.ok = ok
                     self.content = content
+                    self.headers = {}
 
             if url == expected_first_url:
                 return DummyResponse(True, minimal_pdf)
@@ -132,6 +136,7 @@ def test_generate_today_pdf_without_compression():
                 def __init__(self, ok, content=b''):
                     self.ok = ok
                     self.content = content
+                    self.headers = {}
 
             if url == expected_first_url:
                 return DummyResponse(True, minimal_pdf)
@@ -205,3 +210,65 @@ def test_resolve_pdf_url_from_layout():
         resolved_url = paper._resolve_pdf_url(1)
 
     assert resolved_url == urljoin(layout_url, '../../pc/PDF/202407/01/rmrb2024070101.pdf')
+
+
+def test_fetch_page_rejects_non_pdf_content():
+    date = datetime.date.today()
+    paper = Paper(date)
+
+    class DummyResponse:
+        ok = True
+        content = b'<html>not a pdf</html>'
+        headers = {'Content-Type': 'text/html'}
+
+    class DummySession:
+        def get(self, url, timeout):
+            return DummyResponse()
+
+    with patch.object(paper, '_iter_sessions', return_value=[DummySession()]):
+        with patch.object(paper, '_resolve_pdf_url', return_value='https://example.test/page.pdf'):
+            with pytest.raises(PaperDownloadError, match='non-PDF'):
+                paper._fetch_page(1)
+
+
+def test_load_pages_raises_when_intermediate_pdf_download_fails():
+    date = datetime.date.today()
+    paper = Paper(date)
+
+    class DummyResponse:
+        def __init__(self, ok, content=b'%PDF-1.4\n'):
+            self.ok = ok
+            self.content = content
+            self.headers = {}
+
+    class DummySession:
+        def get(self, url, timeout):
+            return DummyResponse(not url.endswith('/2.pdf'))
+
+    with patch.object(paper, '_iter_sessions', return_value=[DummySession()]):
+        with patch.object(
+            paper,
+            '_resolve_pdf_url',
+            side_effect=lambda serial: (
+                f'https://example.test/{serial}.pdf' if serial <= 3 else None
+            ),
+        ):
+            with pytest.raises(PaperDownloadError, match='page 2'):
+                paper._load_pages()
+
+
+def test_parse_date_rejects_invalid_date():
+    with pytest.raises(argparse.ArgumentTypeError, match='invalid date'):
+        parse_date('2025-02-30')
+
+
+def test_main_reports_download_errors_without_traceback(capsys):
+    with patch('sys.argv', ['peoples_daily.py', '-d', '2025-10-15']):
+        with patch.object(Paper, '__call__', side_effect=PaperDownloadError('download failed')):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 1
+    assert 'error: download failed' in captured.err
+    assert 'Traceback' not in captured.err

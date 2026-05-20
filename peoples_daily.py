@@ -23,6 +23,10 @@ from pypdf.errors import PdfReadWarning
 from typing import Iterator, List, Optional
 
 
+class PaperDownloadError(Exception):
+    pass
+
+
 class Paper:
 
     def __init__(self, date: datetime.date, verbose: bool = False, compress: bool = False):
@@ -69,10 +73,17 @@ class Paper:
             except requests.RequestException:
                 continue
 
-            if response.ok:
-                return response.content
+            if not response.ok:
+                continue
 
-        return None
+            if not self._is_pdf_response(response):
+                raise PaperDownloadError(
+                    f'Fetched non-PDF content for page {serial_nb}: {pdf_url}'
+                )
+
+            return response.content
+
+        raise PaperDownloadError(f'Failed to download page {serial_nb}: {pdf_url}')
 
     def _iter_sessions(self) -> Iterator[requests.Session]:
         yield self._session
@@ -137,6 +148,11 @@ class Paper:
 
         return match.group(1)
 
+    @staticmethod
+    def _is_pdf_response(response) -> bool:
+        content = getattr(response, 'content', b'')
+        return b'%PDF-' in content[:1024]
+
     @property
     def _layout_base_urls(self) -> List[str]:
         override = os.environ.get('PEOPLES_DAILY_BASE_URLS')
@@ -153,7 +169,7 @@ class Paper:
 
     def _check_integrity(self, pages: List[bytes]) -> None:
         if len(pages) == 0:
-            raise Exception(
+            raise PaperDownloadError(
                 'Failed! Check if the paper of the date'
                 + ' and the network are available!'
             )
@@ -310,11 +326,21 @@ class Paper:
         return None
 
 
+def parse_date(value: str) -> datetime.date:
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f'invalid date {value!r}; expected YYYY-MM-DD'
+        ) from exc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '-d', '--date',
-        default=datetime.date.today().strftime('%Y-%m-%d'),
+        default=datetime.date.today(),
+        type=parse_date,
         help='the date, e.g., 2025-10-15'
     )
     parser.add_argument(
@@ -334,14 +360,17 @@ def main():
     )
     args = parser.parse_args()
 
-    date = datetime.date.fromisoformat(args.date)
+    date = args.date
 
     if args.output == '':
         file_path = default_file_path(date)
     else:
         file_path = args.output
     paper = Paper(date, args.verbose, args.compress)
-    paper(file_path)
+    try:
+        paper(file_path)
+    except PaperDownloadError as exc:
+        parser.exit(1, f'error: {exc}\n')
 
 
 def default_file_path(date: datetime.date) -> str:
